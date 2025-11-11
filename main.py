@@ -4,14 +4,18 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 import os
-import random # --- 新增：用于随机选择 ---
+import random
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo # --- 新增：导入时区处理库 ---
 import database
 import heatmap
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# --- 新增：定义我们的目标时区（东八区） ---
+TZ = ZoneInfo("Asia/Shanghai")
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -84,7 +88,7 @@ def format_duration(total_seconds):
 
 @tasks.loop(minutes=1)
 async def check_poop_sessions():
-    current_time = datetime.now()
+    current_time = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
     to_remove = []
     
     # 使用快照避免迭代时字典被修改
@@ -153,7 +157,8 @@ async def on_ready():
 async def poop_check_in(interaction: discord.Interaction, hardness: app_commands.Choice[str], is_diarrhea: bool, color: app_commands.Choice[str], notes: str = None):
     database.add_poop_log(
         user_id=interaction.user.id, guild_id=interaction.guild.id, hardness=hardness.value,
-        is_diarrhea=is_diarrhea, color=color.value, notes=notes, start_time=None, end_time=datetime.now()
+        is_diarrhea=is_diarrhea, color=color.value, notes=notes, start_time=None, 
+        end_time=datetime.now(TZ) # --- 修改：使用带时区的时间 ---
     )
     tip = random.choice(HEALTH_TIPS)
     await interaction.response.send_message(f"💩 {interaction.user.mention} 又完成了一件人生大事，记录完毕！\n\n**小助手温馨提示💡**\n> {tip}")
@@ -163,7 +168,7 @@ async def start_poop(interaction: discord.Interaction):
     if interaction.user.id in poop_starters:
         await interaction.response.send_message("别急，你已经在马桶上了！结束后请使用 `/结束拉屎`。", ephemeral=True)
         return
-    poop_starters[interaction.user.id] = (datetime.now(), interaction.guild.id)
+    poop_starters[interaction.user.id] = (datetime.now(TZ), interaction.guild.id) # --- 修改：使用带时区的时间 ---
     poop_reminder_count[interaction.user.id] = 0
     tip = random.choice(HEALTH_TIPS)
     await interaction.response.send_message(f"🏃 {interaction.user.mention} 已坐上王座，祝你...一路顺畅，如黄河入海！🌊\n\n**小助手冷知识放送🔬**\n> {tip}")
@@ -175,7 +180,7 @@ async def end_poop(interaction: discord.Interaction, hardness: app_commands.Choi
     if interaction.user.id in poop_starters:
         start_time, _ = poop_starters.pop(interaction.user.id)
         poop_reminder_count.pop(interaction.user.id, None)
-        end_time = datetime.now()
+        end_time = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
         duration = end_time - start_time
         seconds = int(duration.total_seconds())
         h, m, s = seconds // 3600, (seconds % 3600) // 60, seconds % 60
@@ -209,6 +214,7 @@ async def cancel_check_in(interaction: discord.Interaction):
     if not last_log:
         await interaction.response.send_message("你的历史清清白白，没有记录可以取消。", ephemeral=True)
         return
+    # fromisoformat可以正确处理带时区信息的字符串
     end_time_obj = datetime.fromisoformat(last_log['end_time'])
     time_str = discord.utils.format_dt(end_time_obj, style='R')
     embed = discord.Embed(title="🗑️ 等一下！", description=f"你确定要删除这条 **{time_str}** 的记录吗？此操作无法撤销！", color=discord.Color.orange())
@@ -217,8 +223,8 @@ async def cancel_check_in(interaction: discord.Interaction):
 
 @tree.command(name="拉屎日志", description="看看你这个月的“战绩”和专属热力图！")
 async def poop_log(interaction: discord.Interaction):
-    await interaction.response.defer() # --- 新增：先延迟回应，防止生成图片超时 ---
-    now = datetime.now()
+    await interaction.response.defer() 
+    now = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
     logs = database.get_monthly_logs(interaction.user.id, interaction.guild.id, now.year, now.month)
     if not logs:
         await interaction.followup.send("你这个月风平浪静，还没有任何记录哦。", ephemeral=True)
@@ -229,12 +235,10 @@ async def poop_log(interaction: discord.Interaction):
 
     embed = discord.Embed(title=f"📅 {interaction.user.display_name} 的 {now.year}年{now.month}月“战绩”报告", color=0x7A5543)
     embed.add_field(name="总次数", value=f"{total_times} 次", inline=True)
-    # --- 修改：使用新的时长格式化函数 ---
     embed.add_field(name="总时长", value=format_duration(total_duration_sec), inline=True)
     embed.set_footer(text="热力图上的数字是当天的日期")
 
     try:
-        # --- 修改：传入用户名以显示在标题中 ---
         filepath = heatmap.create_heatmap(logs, now.year, now.month, interaction.user.display_name)
         file = discord.File(filepath, filename=os.path.basename(filepath))
         embed.set_image(url=f"attachment://{os.path.basename(filepath)}")
@@ -249,7 +253,7 @@ async def poop_log(interaction: discord.Interaction):
 @tree.command(name="本月详细日志", description="查看本月详细拉屎日志和统计数据")
 async def monthly_details(interaction: discord.Interaction):
     await interaction.response.defer()
-    now = datetime.now()
+    now = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
     logs = database.get_monthly_logs(interaction.user.id, interaction.guild.id, now.year, now.month)
     
     if not logs:
@@ -287,10 +291,12 @@ async def monthly_details(interaction: discord.Interaction):
     # 添加详细记录列表（最近10条）
     details_text = ""
     for i, log in enumerate(logs[:10]):
+        # fromisoformat可以正确处理带时区信息的字符串
         end_time = datetime.fromisoformat(log['end_time'])
         color = COLOR_MAP.get(log['color'], log['color'] or '未记录')
         diarrhea = "💧拉肚子" if log['is_diarrhea'] else "✅正常"
         note = f" - {log['notes']}" if log['notes'] else ""
+        # 这里的end_time.day, end_time.hour等已经是正确的本地时间了
         details_text += f"**{end_time.day}日 {end_time.hour:02d}:{end_time.minute:02d}** {color} {diarrhea}{note}\n"
     
     if len(logs) > 10:
@@ -302,7 +308,7 @@ async def monthly_details(interaction: discord.Interaction):
 
 @tree.command(name="排行榜", description="围观本服的“厕所之王”！")
 async def leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer() # --- 新增：先延迟回应，防止获取用户数据超时 ---
+    await interaction.response.defer() 
     server_leaderboard = database.get_server_leaderboard(interaction.guild.id)
 
     embed = discord.Embed(title=f"🏆🚽 {interaction.guild.name} 拉屎风云榜 🚽🏆", color=0xD4AF37)
@@ -319,7 +325,6 @@ async def leaderboard(interaction: discord.Interaction):
         except discord.NotFound:
             user_mention = f"已离开的勇士(ID:{user_id})"
 
-        # --- 修改：使用新的时长格式化函数 ---
         duration_str = format_duration(total_duration_sec)
         emoji = rank_emojis.get(rank, f"**{rank}.**")
         description += f"{emoji} {user_mention} - **{times}** 次 (共计: **{duration_str}**)\n"
