@@ -1,0 +1,11 @@
+# Discord Bot Framework
+discord.py
+
+# For loading environment variables from .env file
+python-dotenv
+
+# For creating the heatmap visualization
+matplotlib
+seaborn
+pandas
+numpy
