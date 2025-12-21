@@ -7,14 +7,12 @@ import os
 import random
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo # --- 新增：导入时区处理库 ---
+from zoneinfo import ZoneInfo
 import database
-import heatmap
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-# --- 新增：定义我们的目标时区（东八区） ---
 TZ = ZoneInfo("Asia/Shanghai")
 
 intents = discord.Intents.default()
@@ -49,7 +47,7 @@ COLOR_CHOICES = [
     app_commands.Choice(name="🔴 其他", value="other"),
 ]
 
-# --- 新增：健康小知识列表 ---
+# 健康小知识列表
 HEALTH_TIPS = [
     "多喝水是保持肠道通畅的第一要义！今天你喝够8杯水了吗？",
     "富含纤维的食物，比如蔬菜、水果和全谷物，是肠道的好朋友哦！",
@@ -75,28 +73,31 @@ HEALTH_TIPS = [
 
 def format_duration(total_seconds):
     """将总秒数格式化为易读的“X小时Y分钟”或“Y分钟”"""
+    if total_seconds is None:
+        return "未记录"
     if total_seconds < 60:
         return "不到1分钟"
 
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
 
     if hours > 0:
         return f"{hours}小时 {minutes}分钟"
-    else:
+    elif minutes > 0:
         return f"{minutes}分钟"
+    else:
+        return f"{seconds}秒"
 
 @tasks.loop(minutes=1)
 async def check_poop_sessions():
-    current_time = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
+    current_time = datetime.now(TZ)
     to_remove = []
     
-    # 使用快照避免迭代时字典被修改
     for user_id, (start_time, guild_id) in list(poop_starters.items()):
         duration = current_time - start_time
         duration_minutes = duration.total_seconds() / 60
         
-        # 每10分钟提醒一次
         reminder_count = poop_reminder_count.get(user_id, 0)
         if duration_minutes >= (reminder_count + 1) * 10 and duration_minutes < 60:
             try:
@@ -106,25 +107,19 @@ async def check_poop_sessions():
             except:
                 pass
         
-        # 超过1小时自动结束
         if duration_minutes >= 60:
             to_remove.append((user_id, start_time, guild_id))
     
-    # 自动结束超过1小时的会话
     for user_id, start_time, guild_id in to_remove:
-        # 检查会话是否仍然存在且匹配（用户可能在循环期间手动结束或重新开始）
         popped_session = poop_starters.pop(user_id, None)
         if popped_session is None or popped_session != (start_time, guild_id):
-            # 会话已被手动结束或已开始新会话
             if popped_session is not None:
-                # 恢复新会话
                 poop_starters[user_id] = popped_session
             continue
         
         poop_reminder_count.pop(user_id, None)
         end_time = start_time + timedelta(hours=1)
         
-        # 保存记录，时长为1小时
         database.add_poop_log(
             user_id=user_id, 
             guild_id=guild_id,
@@ -158,7 +153,7 @@ async def poop_check_in(interaction: discord.Interaction, hardness: app_commands
     database.add_poop_log(
         user_id=interaction.user.id, guild_id=interaction.guild.id, hardness=hardness.value,
         is_diarrhea=is_diarrhea, color=color.value, notes=notes, start_time=None, 
-        end_time=datetime.now(TZ) # --- 修改：使用带时区的时间 ---
+        end_time=datetime.now(TZ)
     )
     tip = random.choice(HEALTH_TIPS)
     await interaction.response.send_message(f"💩 {interaction.user.mention} 又完成了一件人生大事，记录完毕！\n\n**小助手温馨提示💡**\n> {tip}")
@@ -168,7 +163,7 @@ async def start_poop(interaction: discord.Interaction):
     if interaction.user.id in poop_starters:
         await interaction.response.send_message("别急，你已经在马桶上了！结束后请使用 `/结束拉屎`。", ephemeral=True)
         return
-    poop_starters[interaction.user.id] = (datetime.now(TZ), interaction.guild.id) # --- 修改：使用带时区的时间 ---
+    poop_starters[interaction.user.id] = (datetime.now(TZ), interaction.guild.id)
     poop_reminder_count[interaction.user.id] = 0
     tip = random.choice(HEALTH_TIPS)
     await interaction.response.send_message(f"🏃 {interaction.user.mention} 已坐上王座，祝你...一路顺畅，如黄河入海！🌊\n\n**小助手冷知识放送🔬**\n> {tip}")
@@ -180,7 +175,7 @@ async def end_poop(interaction: discord.Interaction, hardness: app_commands.Choi
     if interaction.user.id in poop_starters:
         start_time, _ = poop_starters.pop(interaction.user.id)
         poop_reminder_count.pop(interaction.user.id, None)
-        end_time = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
+        end_time = datetime.now(TZ)
         duration = end_time - start_time
         seconds = int(duration.total_seconds())
         h, m, s = seconds // 3600, (seconds % 3600) // 60, seconds % 60
@@ -214,95 +209,81 @@ async def cancel_check_in(interaction: discord.Interaction):
     if not last_log:
         await interaction.response.send_message("你的历史清清白白，没有记录可以取消。", ephemeral=True)
         return
-    # fromisoformat可以正确处理带时区信息的字符串
+    
     end_time_obj = datetime.fromisoformat(last_log['end_time'])
     time_str = discord.utils.format_dt(end_time_obj, style='R')
     embed = discord.Embed(title="🗑️ 等一下！", description=f"你确定要删除这条 **{time_str}** 的记录吗？此操作无法撤销！", color=discord.Color.orange())
     view = ConfirmCancelView(log_id=last_log['id'])
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-@tree.command(name="拉屎日志", description="看看你这个月的“战绩”和专属热力图！")
-async def poop_log(interaction: discord.Interaction):
-    await interaction.response.defer() 
-    now = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
-    logs = database.get_monthly_logs(interaction.user.id, interaction.guild.id, now.year, now.month)
-    if not logs:
-        await interaction.followup.send("你这个月风平浪静，还没有任何记录哦。", ephemeral=True)
-        return
 
-    total_duration_sec = sum(row['duration_seconds'] for row in logs if row['duration_seconds'] is not None)
-    total_times = len(logs)
-
-    embed = discord.Embed(title=f"📅 {interaction.user.display_name} 的 {now.year}年{now.month}月“战绩”报告", color=0x7A5543)
-    embed.add_field(name="总次数", value=f"{total_times} 次", inline=True)
-    embed.add_field(name="总时长", value=format_duration(total_duration_sec), inline=True)
-    embed.set_footer(text="热力图上的数字是当天的日期")
-
-    try:
-        filepath = heatmap.create_heatmap(logs, now.year, now.month, interaction.user.display_name)
-        file = discord.File(filepath, filename=os.path.basename(filepath))
-        embed.set_image(url=f"attachment://{os.path.basename(filepath)}")
-        await interaction.followup.send(embed=embed, file=file)
-        os.remove(filepath)
-    except Exception as e:
-        print(f"生成热力图失败: {e}")
-        await interaction.followup.send(embed=embed)
-
-
-
-@tree.command(name="本月详细日志", description="查看本月详细拉屎日志和统计数据")
-async def monthly_details(interaction: discord.Interaction):
+@tree.command(name="本月详细日志", description="查看本月详细拉屎日志和统计数据，可筛选备注")
+@app_commands.describe(only_notes="只查看有备注的日志吗？")
+async def monthly_details(interaction: discord.Interaction, only_notes: bool = False):
     await interaction.response.defer()
-    now = datetime.now(TZ) # --- 修改：使用带时区的时间 ---
+    now = datetime.now(TZ)
     logs = database.get_monthly_logs(interaction.user.id, interaction.guild.id, now.year, now.month)
     
     if not logs:
         await interaction.followup.send("你这个月风平浪静，还没有任何记录哦。", ephemeral=True)
         return
+
+    filtered_logs = [log for log in logs if not only_notes or (only_notes and log['notes'])]
     
+    if not filtered_logs and only_notes:
+        await interaction.followup.send("本月没有找到任何带备注的记录哦。", ephemeral=True)
+        return
+    elif not filtered_logs: # 理论上不会发生，因为上面已经判断过 logs 是否为空
+        await interaction.followup.send("本月没有任何记录哦。", ephemeral=True)
+        return
+
     # 统计数据
     color_stats = {}
     diarrhea_count = 0
     
-    for log in logs:
-        # 统计颜色
+    for log in filtered_logs:
         color = COLOR_MAP.get(log['color'], log['color'] or '未记录')
         color_stats[color] = color_stats.get(color, 0) + 1
         
-        # 统计拉肚子次数
         if log['is_diarrhea']:
             diarrhea_count += 1
     
-    # 创建嵌入消息
     embed = discord.Embed(
         title=f"📊 {interaction.user.display_name} 的 {now.year}年{now.month}月详细日志",
-        description=f"共 {len(logs)} 条记录",
+        description=f"共 {len(filtered_logs)} 条记录{'（仅显示有备注的记录）' if only_notes else ''}",
         color=0x7A5543
     )
     
-    # 添加颜色统计
     color_text = "\n".join([f"{color}: {count}次" for color, count in sorted(color_stats.items(), key=lambda x: x[1], reverse=True)])
     embed.add_field(name="🎨 颜色统计", value=color_text or "无数据", inline=False)
     
-    # 添加拉肚子统计
     embed.add_field(name="💧 拉肚子次数", value=f"{diarrhea_count}次", inline=True)
-    embed.add_field(name="✅ 正常次数", value=f"{len(logs) - diarrhea_count}次", inline=True)
+    embed.add_field(name="✅ 正常次数", value=f"{len(filtered_logs) - diarrhea_count}次", inline=True)
     
-    # 添加详细记录列表（最近10条）
+    # 添加详细记录列表
     details_text = ""
-    for i, log in enumerate(logs[:10]):
-        # fromisoformat可以正确处理带时区信息的字符串
+    for i, log in enumerate(filtered_logs):
         end_time = datetime.fromisoformat(log['end_time'])
+        start_time = datetime.fromisoformat(log['start_time']) if log['start_time'] else None
+        
+        duration_seconds = log['duration_seconds'] if log['duration_seconds'] is not None else \
+                           int((end_time - start_time).total_seconds()) if start_time else None
+        
+        duration_str = format_duration(duration_seconds)
+
         color = COLOR_MAP.get(log['color'], log['color'] or '未记录')
         diarrhea = "💧拉肚子" if log['is_diarrhea'] else "✅正常"
-        note = f" - {log['notes']}" if log['notes'] else ""
-        # 这里的end_time.day, end_time.hour等已经是正确的本地时间了
-        details_text += f"**{end_time.day}日 {end_time.hour:02d}:{end_time.minute:02d}** {color} {diarrhea}{note}\n"
+        note = f" - **备注**：{log['notes']}" if log['notes'] else ""
+        
+        details_text += (
+            f"**{end_time.day}日 {end_time.hour:02d}:{end_time.minute:02d}** "
+            f"({duration_str}) - {color} {diarrhea}{note}\n"
+        )
+        if len(details_text) > 3500: # 避免 embed 字段过长
+            details_text += f"\n... 还有 {len(filtered_logs) - (i+1)} 条记录未显示。"
+            break
     
-    if len(logs) > 10:
-        details_text += f"\n... 还有 {len(logs) - 10} 条记录"
-    
-    embed.add_field(name="📋 最近记录", value=details_text or "无记录", inline=False)
+    embed.add_field(name="📋 详细记录", value=details_text or "无记录", inline=False)
     
     await interaction.followup.send(embed=embed)
 
