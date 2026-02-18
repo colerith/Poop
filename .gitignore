@@ -1,0 +1,17 @@
+# 数据库文件
+*.db
+*.sqlite3
+
+# 环境变量文件
+.env
+
+# Python 虚拟环境
+venv/
+.venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# IDE 配置文件 (例如 VSCode)
+.vscode/
