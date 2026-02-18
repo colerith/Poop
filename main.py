@@ -18,6 +18,7 @@ TEST_GUILDS = [1384945301780955246, 1397629012292931726]
 class PoopBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
+        intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
