@@ -1,8 +1,9 @@
 # database.py
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
+# === 初始化数据库 ===
 def init_db():
     conn = sqlite3.connect('poop.db')
     c = conn.cursor()
@@ -23,6 +24,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# === 添加记录 ===
 def add_poop_log(user_id, guild_id, hardness, is_diarrhea, color, notes, start_time, end_time):
     conn = sqlite3.connect('poop.db')
     c = conn.cursor()
@@ -37,6 +39,7 @@ def add_poop_log(user_id, guild_id, hardness, is_diarrhea, color, notes, start_t
     conn.commit()
     conn.close()
 
+# === 获取月度记录 ===
 def get_monthly_logs(user_id, guild_id, year, month):
     conn = sqlite3.connect('poop.db')
     # 使用 sqlite3.Row 可以让我们通过列名访问数据，更方便
@@ -53,6 +56,30 @@ def get_monthly_logs(user_id, guild_id, year, month):
     conn.close()
     return logs
 
+# === 获取周度记录 ===
+def get_weekly_logs(user_id, guild_id, year, month, day):
+    """获取指定日期所在周（周一至周日）的日志"""
+    conn = sqlite3.connect('poop.db')
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # 计算本周的开始（周一）和结束（周日）
+    today = datetime(year, month, day)
+    start_of_week = today - timedelta(days=today.weekday())
+    end_of_week = start_of_week + timedelta(days=6)
+
+    c.execute('''
+        SELECT * FROM poop_log
+        WHERE user_id = ? AND guild_id = ? AND
+              DATE(end_time) BETWEEN DATE(?) AND DATE(?)
+        ORDER BY end_time DESC
+    ''', (user_id, guild_id, start_of_week.strftime('%Y-%m-%d'), end_of_week.strftime('%Y-%m-%d')))
+
+    logs = c.fetchall()
+    conn.close()
+    return logs
+
+# === 获取服务器排行榜 ===
 def get_server_leaderboard(guild_id):
     conn = sqlite3.connect('poop.db')
     c = conn.cursor()
@@ -67,7 +94,7 @@ def get_server_leaderboard(guild_id):
     conn.close()
     return leaderboard
 
-# --- 新增函数 ---
+# === 获取最后一条记录 ===
 def get_last_poop_log(user_id, guild_id):
     """获取指定用户在服务器的最后一条记录"""
     conn = sqlite3.connect('poop.db')
@@ -83,7 +110,7 @@ def get_last_poop_log(user_id, guild_id):
     conn.close()
     return log
 
-# --- 新增函数 ---
+# === 删除记录 ===
 def delete_poop_log(log_id):
     """根据记录的ID删除它"""
     conn = sqlite3.connect('poop.db')
