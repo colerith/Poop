@@ -78,31 +78,63 @@ bot = PoopBot()
 
 # --- 手动同步指令 !sync ---
 @bot.command(name="sync")
-@commands.is_owner() # 只有机器人所有者能使用
-async def sync(ctx: commands.Context, guild_id: int = None):
+@commands.is_owner()
+async def sync(ctx: commands.Context, action: str = "sync", guild_id_str: str = None):
     """
-    手动将斜杠命令同步到指定服务器或当前服务器。
+    手动管理斜杠命令。
     用法:
-    !sync -> 同步到当前服务器
-    !sync [服务器ID] -> 同步到指定ID服务器
+    !sync              -> 为当前服务器同步指令
+    !sync sync [guild_id] -> 为指定服务器同步指令
+    !sync clear        -> 清除当前服务器的指令
+    !sync clear [guild_id] -> 清除指定服务器的指令
+    !sync clear_global -> !!谨慎!! 清除所有全局指令
     """
-    target_guild_id = guild_id or ctx.guild.id
-    if not target_guild_id:
-        await ctx.send("❌ 请在服务器内使用此命令，或提供一个服务器ID。")
-        return
+    target_guild_id = None
+    if guild_id_str:
+        try:
+            target_guild_id = int(guild_id_str)
+        except ValueError:
+            await ctx.send("❌ 服务器ID必须是数字。")
+            return
+    elif ctx.guild:
+        target_guild_id = ctx.guild.id
 
-    msg = await ctx.send(f"🚑 正在向服务器 `{target_guild_id}` 紧急同步命令...")
+    if action == "clear":
+        if not target_guild_id:
+            await ctx.send("❌ 请提供服务器ID或在服务器内使用 `!sync clear`。")
+            return
+        msg = await ctx.send(f"🧹 正在清除服务器 `{target_guild_id}` 的专属指令...")
+        try:
+            guild = discord.Object(id=target_guild_id)
+            bot.tree.clear_commands(guild=guild)
+            await bot.tree.sync(guild=guild)
+            await msg.edit(content=f"✅ 成功清除了服务器 `{target_guild_id}` 的所有专属指令。")
+        except Exception as e:
+            await msg.edit(content=f"❌ 清除失败: {e}")
 
-    guild = discord.Object(id=target_guild_id)
-    try:
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        await msg.edit(content=f"✅ **同步成功！**\n已向服务器 `{target_guild_id}` 注册了 **{len(synced)}** 个命令。\n\n**请注意：**\n> 成员可能需要 **重启 Discord 客户端 (Ctrl+R)** 才能看到最新的命令。")
-        print(f"[手动同步] 成功将 {len(synced)} 个命令同步到服务器 {target_guild_id}。")
-    except Exception as e:
-        await msg.edit(content=f"❌ **同步失败！**\n错误信息: ```{e}```")
-        import traceback
-        traceback.print_exc()
+    elif action == "sync":
+        if not target_guild_id:
+            await ctx.send("❌ 请提供服务器ID或在服务器内使用 `!sync`。")
+            return
+        msg = await ctx.send(f"🚑 正在向服务器 `{target_guild_id}` 同步指令...")
+        try:
+            guild = discord.Object(id=target_guild_id)
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            await msg.edit(content=f"✅ **同步成功！**\n已向服务器 `{target_guild_id}` 注册了 **{len(synced)}** 个命令。")
+        except Exception as e:
+            await msg.edit(content=f"❌ 同步失败: {e}")
+
+    elif action == "clear_global":
+        msg = await ctx.send("⚠️ **危险操作！** 正在清除所有全局指令...")
+        try:
+            bot.tree.clear_commands(guild=None) # guild=None 表示全局
+            await bot.tree.sync(guild=None)
+            await msg.edit(content="✅ 成功清除了所有全局指令。机器人现在没有任何全局指令了。")
+        except Exception as e:
+            await msg.edit(content=f"❌ 全局清除失败: {e}")
+    else:
+        await ctx.send("无效的操作。请使用 `sync`, `clear`, 或 `clear_global`。")
 
 # --- 运行 Bot ---
 if __name__ == "__main__":
