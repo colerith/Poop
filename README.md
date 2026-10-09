@@ -68,3 +68,28 @@ python -m unittest discover -s tests -v
 ```
 
 本次精简前的源码备份保存在 `.local-backups/before-reset-20261009.zip`，该目录不会提交到 Git。
+
+## PM2 提示没有 tree 属性
+
+`AttributeError: 'PoopBot' object has no attribute 'tree'` 表示实际加载的 Discord 库不符合本项目要求。官方 discord.py 2.x 的 `commands.Bot` 会自动创建命令树。旧版本、同名分支包覆盖或者 PM2 使用了其他 Python 环境都可能造成问题。启动前会检查版本和必要 API，并在不兼容时报告解释器及模块路径。
+
+建议在服务器的项目目录创建独立虚拟环境，不要卸载系统 Python 中其他项目的依赖：
+
+```sh
+cd /root/Poop
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install --upgrade -r requirements.txt
+.venv/bin/python -c "import sys, discord; from discord.ext import commands; print(sys.executable, discord.__version__, discord.__file__); assert hasattr(commands.Bot, 'tree')"
+```
+
+若提示缺少 venv 模块，在 Debian/Ubuntu 安装与当前 Python 版本对应的 venv 包（例如 `python3-venv`）。确认以上步骤成功后，重新创建此机器人的 PM2 进程以明确指定解释器：
+
+```sh
+pm2 delete poop
+pm2 start /root/Poop/main.py --name poop --cwd /root/Poop --interpreter /root/Poop/.venv/bin/python
+pm2 save
+pm2 logs poop --lines 50
+```
+
+以上命令使用项目 `.env` 配置。若原 PM2 进程另有自定义环境变量或启动参数，请在重建时一并保留。`.env` 必须使用 Developer Portal 中应用的 Bot Token。

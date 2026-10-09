@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import sys
 from pathlib import Path
 
 import discord
@@ -12,8 +13,24 @@ log = logging.getLogger(__name__)
 load_dotenv(Path(__file__).with_name(".env"))
 
 
+def check_discord_runtime():
+    """同名 discord 包可能由不兼容的分支提供，登录前检查实际 API。"""
+    version = getattr(discord, "version_info", None)
+    if (version is None or version < (2, 4) or version >= (3, 0)
+            or not hasattr(commands.Bot, "tree")
+            or not asyncio.iscoroutinefunction(commands.Bot.load_extension)):
+        raise RuntimeError(
+            "Discord 依赖不兼容：本项目需要官方 discord.py>=2.4,<3。"
+            "请在独立虚拟环境安装 requirements.txt，并让 PM2 使用该环境的 Python。"
+            f" 当前解释器：{sys.executable}；"
+            f"discord 路径：{getattr(discord, '__file__', '未知')}；"
+            f"版本：{getattr(discord, '__version__', '未知')}。"
+        )
+
+
 class PoopBot(commands.Bot):
     def __init__(self):
+        check_discord_runtime()
         intents = discord.Intents.default()
         # 斜杠命令不依赖特权 Intent；仅在需要 !sync 时启用。
         intents.message_content = os.getenv("ENABLE_MESSAGE_CONTENT", "false").lower() == "true"

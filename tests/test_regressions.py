@@ -16,6 +16,21 @@ from cogs.poop_tracker.reporting import build_weekly_details_embeds
 from cogs.poop_tracker.session_state import PoopSessionState
 
 
+class RuntimeTests(unittest.TestCase):
+    def test_official_runtime_supported(self):
+        main.check_discord_runtime()
+
+    def test_fork_without_tree_rejected_before_initialization(self):
+        with patch.object(main.commands, 'Bot', SimpleNamespace(load_extension=AsyncMock())):
+            with self.assertRaisesRegex(RuntimeError, 'Discord 依赖不兼容'):
+                main.PoopBot()
+
+    def test_old_runtime_rejected(self):
+        with patch.object(main.discord, 'version_info', (1, 7, 3)):
+            with self.assertRaisesRegex(RuntimeError, 'Discord 依赖不兼容'):
+                main.check_discord_runtime()
+
+
 class DatabaseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
