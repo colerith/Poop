@@ -2,10 +2,13 @@
 
 import sqlite3
 from datetime import datetime, timedelta
+from pathlib import Path
+
+DB_PATH = Path(__file__).resolve().parents[2] / "poop.db"
 
 # === 初始化数据库 ===
 def init_db():
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS poop_log (
@@ -26,31 +29,33 @@ def init_db():
 
 # === 添加记录 ===
 def add_poop_log(user_id, guild_id, hardness, is_diarrhea, color, notes, start_time, end_time):
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     duration_seconds = None
     if start_time and end_time:
-        duration_seconds = (end_time - start_time).total_seconds()
+        duration_seconds = max(0, int((end_time - start_time).total_seconds()))
 
     c.execute('''
         INSERT INTO poop_log (user_id, guild_id, hardness, is_diarrhea, color, notes, start_time, end_time, duration_seconds)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (user_id, guild_id, hardness, is_diarrhea, color, notes, start_time, end_time, duration_seconds))
+    ''', (user_id, guild_id, hardness, is_diarrhea, color, notes,
+          start_time.isoformat(sep=" ") if start_time else None,
+          end_time.isoformat(sep=" ") if end_time else None, duration_seconds))
     conn.commit()
     conn.close()
 
 # === 获取月度记录 ===
 def get_monthly_logs(user_id, guild_id, year, month):
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     # 使用 sqlite3.Row 可以让我们通过列名访问数据，更方便
     conn.row_factory = sqlite3.Row 
     c = conn.cursor()
     c.execute('''
         SELECT * FROM poop_log
         WHERE user_id = ? AND guild_id = ? AND
-              strftime('%Y', end_time) = ? AND
-              strftime('%m', end_time) = ?
-        ORDER BY end_time DESC
+              substr(end_time, 1, 4) = ? AND
+              substr(end_time, 6, 2) = ?
+        ORDER BY end_time DESC, id DESC
     ''', (user_id, guild_id, str(year), str(month).zfill(2)))
     logs = c.fetchall()
     conn.close()
@@ -59,7 +64,7 @@ def get_monthly_logs(user_id, guild_id, year, month):
 # === 获取周度记录 ===
 def get_weekly_logs(user_id, guild_id, year, month, day):
     """获取指定日期所在周（周一至周日）的日志"""
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
@@ -71,8 +76,8 @@ def get_weekly_logs(user_id, guild_id, year, month, day):
     c.execute('''
         SELECT * FROM poop_log
         WHERE user_id = ? AND guild_id = ? AND
-              DATE(end_time) BETWEEN DATE(?) AND DATE(?)
-        ORDER BY end_time DESC
+              substr(end_time, 1, 10) BETWEEN ? AND ?
+        ORDER BY end_time DESC, id DESC
     ''', (user_id, guild_id, start_of_week.strftime('%Y-%m-%d'), end_of_week.strftime('%Y-%m-%d')))
 
     logs = c.fetchall()
@@ -81,12 +86,12 @@ def get_weekly_logs(user_id, guild_id, year, month, day):
 
 # === 获取服务器排行榜 ===
 def get_server_leaderboard(guild_id):
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
         SELECT user_id, COUNT(*), SUM(duration_seconds)
         FROM poop_log
-        WHERE guild_id = ? AND duration_seconds IS NOT NULL
+        WHERE guild_id = ?
         GROUP BY user_id
         ORDER BY COUNT(*) DESC, SUM(duration_seconds) DESC
     ''', (guild_id,))
@@ -97,13 +102,13 @@ def get_server_leaderboard(guild_id):
 # === 获取最后一条记录 ===
 def get_last_poop_log(user_id, guild_id):
     """获取指定用户在服务器的最后一条记录"""
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row 
     c = conn.cursor()
     c.execute('''
         SELECT * FROM poop_log
         WHERE user_id = ? AND guild_id = ?
-        ORDER BY end_time DESC
+        ORDER BY end_time DESC, id DESC
         LIMIT 1
     ''', (user_id, guild_id))
     log = c.fetchone()
@@ -113,7 +118,7 @@ def get_last_poop_log(user_id, guild_id):
 # === 删除记录 ===
 def delete_poop_log(log_id):
     """根据记录的ID删除它"""
-    conn = sqlite3.connect('poop.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM poop_log WHERE id = ?', (log_id,))
     conn.commit()

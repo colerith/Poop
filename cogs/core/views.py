@@ -10,10 +10,10 @@ class ConfirmCancelView(discord.ui.View):
     @discord.ui.button(label="确认删除", style=discord.ButtonStyle.danger, custom_id="confirm_delete")
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         database.delete_poop_log(self.log_id)
-        await interaction.response.edit_message(content="✅ **记录已删除，就当无事发生。**", view=None)
+        await interaction.response.edit_message(content="✅ **记录已删除，就当无事发生。**", embed=None, view=None)
         self.stop()
 
     @discord.ui.button(label="手滑了", style=discord.ButtonStyle.secondary, custom_id="cancel_delete")
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="操作已取消，记录被抢救了回来！", view=None)
+        await interaction.response.edit_message(content="操作已取消，记录被抢救了回来！", embed=None, view=None)
         self.stop()
