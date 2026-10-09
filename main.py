@@ -1,4 +1,4 @@
-"""机器人入口：全局注册，并向每个已加入的服务器同步命令。"""
+"""机器人入口：仅向服务器注册命令，并清理旧的全局命令。"""
 import asyncio
 import logging
 import os
@@ -38,21 +38,34 @@ class PoopBot(commands.Bot):
                          allowed_mentions=discord.AllowedMentions.none())
         self._synced_guilds = set()
         self._sync_lock = asyncio.Lock()
-        self._global_synced = False
+        self._global_cleared = False
 
     async def setup_hook(self):
         # 加载失败必须终止启动，避免把空命令树同步到 Discord。
         await self.load_extension("cogs.poop_tracker")
-        await self.sync_global()
+        await self.clear_legacy_global()
 
-    async def sync_global(self):
+    async def clear_remote_commands(self, guild=None):
+        # 全局树仅用作本地命令模板，远端只能保留服务器专属命令。
+        async with self._sync_lock:
+            saved = self.tree.get_commands(guild=guild)
+            try:
+                self.tree.clear_commands(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+            finally:
+                for command in saved:
+                    self.tree.add_command(command, guild=guild, override=True)
+            if guild is None:
+                self._global_cleared = True
+            return synced
+
+    async def clear_legacy_global(self):
         try:
-            synced = await self.tree.sync()
+            await self.clear_remote_commands()
         except discord.HTTPException:
-            log.exception("全局命令同步失败；连接就绪后将重试")
+            log.exception("旧全局命令清理失败；重新连接后重试，期间可能仍显示重复命令")
             return
-        self._global_synced = True
-        log.info("已同步 %s 条全局命令", len(synced))
+        log.info("旧全局命令已清空；仅保留服务器专属命令")
 
     async def sync_guild(self, guild):
         async with self._sync_lock:
@@ -72,8 +85,8 @@ class PoopBot(commands.Bot):
             log.exception("服务器 %s 同步失败；可重新连接或使用 !sync 重试", guild.id)
 
     async def on_ready(self):
-        if not self._global_synced:
-            await self.sync_global()
+        if not self._global_cleared:
+            await self.clear_legacy_global()
         for guild in self.guilds:
             if guild.id not in self._synced_guilds:
                 await self.try_sync_guild(guild)
@@ -92,9 +105,9 @@ bot = PoopBot()
 @bot.command(name="sync")
 @commands.is_owner()
 async def sync(ctx: commands.Context, action: str = "sync", guild_id_str: str = None):
-    """所有者维护命令：!sync [sync|clear|global|clear_global] [服务器ID]。"""
-    if action not in {"sync", "clear", "global", "clear_global"}:
-        await ctx.send("用法：`!sync [sync|clear|global|clear_global] [服务器ID]`")
+    """所有者维护命令：!sync [sync|clear|clear_global] [服务器ID]。"""
+    if action not in {"sync", "clear", "clear_global"}:
+        await ctx.send("用法：`!sync [sync|clear|clear_global] [服务器ID]`")
         return
     guild_id = ctx.guild.id if ctx.guild else None
     if guild_id_str:
@@ -111,20 +124,9 @@ async def sync(ctx: commands.Context, action: str = "sync", guild_id_str: str = 
     try:
         if action == "sync":
             synced = await bot.sync_guild(discord.Object(id=guild_id))
-        elif action == "global":
-            synced = await bot.tree.sync()
-            bot._global_synced = True
         else:
             guild = discord.Object(id=guild_id) if action == "clear" else None
-            # 清除远端命令后恢复本地定义，确保后续 !sync 能正常重新注册。
-            async with bot._sync_lock:
-                saved = bot.tree.get_commands(guild=guild)
-                try:
-                    bot.tree.clear_commands(guild=guild)
-                    synced = await bot.tree.sync(guild=guild)
-                finally:
-                    for command in saved:
-                        bot.tree.add_command(command, guild=guild, override=True)
+            synced = await bot.clear_remote_commands(guild)
         await ctx.send(f"✅ 操作完成：{action}，远端现有 {len(synced)} 条命令。")
     except discord.HTTPException:
         log.exception("手动命令同步失败")

@@ -110,12 +110,18 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
         self.patch.stop()
         self.temp.cleanup()
 
-    async def test_exact_original_commands_loaded_and_global_synced(self):
+    async def test_exact_original_commands_loaded_and_global_cleared(self):
+        payloads = []
+        async def capture_sync(*, guild=None):
+            payloads.append((guild, list(self.bot.tree.get_commands(guild=guild))))
+            return []
+        self.bot.tree.sync.side_effect = capture_sync
         await self.bot.setup_hook()
+        self.assertEqual(payloads, [(None, [])])
         self.assertEqual({c.name for c in self.bot.tree.get_commands()},
                          {'拉屎打卡', '开始拉屎', '结束拉屎', '取消打卡', '本周详细日志', '本月热力图', '排行榜'})
         self.assertTrue(all(c.guild_only for c in self.bot.tree.get_commands()))
-        self.bot.tree.sync.assert_awaited_once_with()
+        self.bot.tree.sync.assert_awaited_once_with(guild=None)
 
     async def test_load_failure_does_not_sync_empty_tree(self):
         with patch.object(self.bot, 'load_extension', AsyncMock(side_effect=RuntimeError('load failed'))):
@@ -149,8 +155,27 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
                 await main.sync.callback(ctx, 'clear_global')
             self.assertEqual(self.bot.tree.get_commands(), saved)
 
+    async def test_global_registration_action_rejected(self):
+        ctx = SimpleNamespace(guild=None, send=AsyncMock())
+        with patch.object(main, 'bot', self.bot):
+            await main.sync.callback(ctx, 'global')
+        self.bot.tree.sync.assert_not_awaited()
+
+    async def test_cleanup_failure_restores_template_and_retries(self):
+        failure = discord.HTTPException(SimpleNamespace(status=500, reason='test'), 'test')
+        self.bot.tree.sync.side_effect = [failure, [], []]
+        with self.assertLogs('main', level='ERROR'):
+            await self.bot.setup_hook()
+        self.assertFalse(self.bot._global_cleared)
+        self.assertEqual(len(self.bot.tree.get_commands()), 7)
+        guilds = [SimpleNamespace(id=123)]
+        with patch.object(main.PoopBot, 'guilds', new=property(lambda _: guilds)):
+            await self.bot.on_ready()
+        self.assertTrue(self.bot._global_cleared)
+        self.assertEqual(len(self.bot.tree.get_commands(guild=discord.Object(id=123))), 7)
+
     async def test_failed_guild_does_not_prevent_other_guilds(self):
-        self.bot._global_synced = True
+        self.bot._global_cleared = True
         failure = discord.Forbidden(SimpleNamespace(status=403, reason='test'), 'test')
         self.bot.tree.sync.side_effect = [failure, []]
         guilds = [SimpleNamespace(id=123), SimpleNamespace(id=456)]
